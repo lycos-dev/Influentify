@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CreatorStatus {
+  CANDIDATE
+  APPROVED
+  VOIDED
+}
+
+enum ExclusionType {
+  USED
+  VOIDED
+}
+
+model Creator {
+  id                 String        @id @default(cuid())
+  name               String?
+  handle             String        @unique
+  instagramUrl       String
+  country            String?
+  city               String?
+  niche              String?
+  followers          Int?
+  engagementRate     Float?
+  avgLikes           Int?
+  avgReelViews       Int?
+  email              String?
+  lastPostAt         DateTime?
+  score              Float         @default(0)
+  status             CreatorStatus @default(CANDIDATE)
+  source             String?       @default("manual")
+  sourceSnippet      String?
+  notes              String?
+  voidReason         String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  campaignCreators   CampaignCreator[]
+
+  @@index([status])
+  @@index([country])
+  @@index([followers])
+  @@index([score])
+}
+
+model Campaign {
+  id                  String   @id @default(cuid())
+  name                String
+  countries           String[]
+  niches              String[]
+  minFollowers        Int?
+  maxFollowers        Int?
+  minEngagementRate   Float?
+  minAvgReelViews     Int?
+  emailRequired       Boolean  @default(false)
+  activeWithinDays    Int?
+  targetCount         Int      @default(100)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  creators            CampaignCreator[]
+}
+
+model CampaignCreator {
+  id          String   @id @default(cuid())
+  campaignId  String
+  creatorId   String
+  addedAt     DateTime @default(now())
+
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creator     Creator  @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, creatorId])
+}
+
+model Exclusion {
+  id          String        @id @default(cuid())
+  handle      String
+  type        ExclusionType
+  reason      String?
+  sourceFile  String?
+  createdAt   DateTime      @default(now())
+
+  @@unique([handle, type])
+  @@index([handle])
+  @@index([type])
+}
