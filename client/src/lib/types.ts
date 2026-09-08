@@ -57,3 +57,13 @@ export type Exclusion = {
   sourceFile?: string | null;
   createdAt: string;
 };
+
+
+export type DiscoveryStatus = {
+  provider: 'Brave Search';
+  configured: boolean;
+  monthKey: string;
+  requestsUsed: number;
+  monthlyBudget: number;
+  remainingAppBudget: number;
+};

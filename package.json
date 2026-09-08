@@ -1,9 +1,12 @@
 {
-  "name": "influencer-reach",
+  "name": "influentify",
   "private": true,
-  "version": "1.0.0",
+  "version": "3.0.0",
   "type": "module",
-  "workspaces": ["client", "server"],
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "scripts": {
     "dev": "concurrently -n API,WEB -c auto \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w client && npm run build -w server",

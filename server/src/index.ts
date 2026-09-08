@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { prisma } from './lib/prisma.js';
 import { normalizeInstagramHandle, instagramUrl } from './lib/handles.js';
 import { creatorPassesBrief, creatorPotentiallyMatchesBrief, requiredFieldCoverage, scoreCreator } from './lib/score.js';
-import { discoverFree, researchCreatorFree } from './lib/discovery.js';
+import { discoverFree, getDiscoveryUsageStatus, researchCreatorFree } from './lib/discovery.js';
 import { extractInstagramHandles } from './lib/importer.js';
 
 const app = express();
@@ -50,9 +50,17 @@ const briefSchema = z.object({
 app.get('/api/health', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ ok: true, database: true, discovery: 'duckduckgo-public-web', paidProvider: false });
+    res.json({ ok: true, database: true, discovery: 'brave-search-public-web', paidCreatorProvider: false });
   } catch {
     res.status(503).json({ ok: false, database: false });
+  }
+});
+
+app.get('/api/discovery/status', async (_req, res) => {
+  try {
+    res.json(await getDiscoveryUsageStatus());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Could not read discovery usage.' });
   }
 });
 
@@ -216,9 +224,10 @@ app.post('/api/discovery/search', async (req, res) => {
     .map(c => ({ ...c, score: scoreCreator(c, brief), coverage: requiredFieldCoverage(c, brief) }))
     .sort((a, b) => (b.score * .75 + b.dataConfidence * .25) - (a.score * .75 + a.dataConfidence * .25));
 
-  // Zero-cost public-web discovery through DuckDuckGo's non-JavaScript search results. We do not automate
-  // Instagram login, bypass access controls, or invent unavailable metrics.
-  const external = await discoverFree(brief);
+  // Public-web discovery through Brave Search. Influentify keeps an app-side monthly request budget
+  // so discovery stays inside the user's free-search allowance. No Instagram login automation or guessed metrics.
+  const discoveryRun = await discoverFree(brief);
+  const external = discoveryRun.profiles;
   const exclusions = new Set((await prisma.exclusion.findMany({ select: { handle: true } })).map(x => x.handle));
   const known = new Set(existing.map(x => x.handle));
   let newlyAdded = 0;
@@ -279,24 +288,28 @@ app.post('/api/discovery/search', async (req, res) => {
     verificationStatus: strictMatch ? 'VERIFIED_FOR_BRIEF' : creator.verificationStatus
   }));
 
+  const usage = await getDiscoveryUsageStatus();
   res.json({
-    provider: 'DuckDuckGo public web + Influentify database',
+    provider: 'Brave Search + Influentify database',
     paidProvider: false,
     newlyAdded,
     excluded,
     existingMatches: existingMatches.length,
     strictVerified,
+    requestsUsedThisRun: discoveryRun.requestsUsedThisRun,
+    quotaReached: discoveryRun.quotaReached,
+    usage,
     results,
     note: newlyAdded
-      ? `Free public-web research found ${newlyAdded} new profiles. ${strictVerified} currently satisfy every requested field with saved data; the rest are ranked leads with missing fields shown for review.`
-      : 'No new public profiles were returned this run. Influentify still ranked compatible creators already in your vault. Free search can be rate-limited, so retry later or broaden the campaign brief.'
+      ? `Brave public-web research found ${newlyAdded} new profiles using ${discoveryRun.requestsUsedThisRun} search request${discoveryRun.requestsUsedThisRun === 1 ? '' : 's'}. ${strictVerified} currently satisfy every requested field with saved data; the rest are ranked leads with unknown fields left for verification.${discoveryRun.quotaReached ? ' The app-side monthly search budget was reached during this run.' : ''}`
+      : `No new public profiles were returned from ${discoveryRun.requestsUsedThisRun} Brave search request${discoveryRun.requestsUsedThisRun === 1 ? '' : 's'}. Influentify still ranked compatible creators already in your vault.${discoveryRun.quotaReached ? ' The app-side monthly search budget has been reached.' : ' Try broadening the campaign brief if the search is too narrow.'}`
   });
 });
 
 app.post('/api/creators/:id/research', async (req, res) => {
   const current = await prisma.creator.findUnique({ where: { id: req.params.id } });
   if (!current) return res.status(404).json({ error: 'Creator not found.' });
-  const researched = await researchCreatorFree(current.handle, { countries: [], niches: [] });
+  const researched = await researchCreatorFree(current.handle, { countries: current.country ? [current.country] : [], niches: current.niche ? [current.niche] : [] });
   if (!researched) return res.status(404).json({ error: 'No additional public-web evidence found.' });
 
   const merged = {

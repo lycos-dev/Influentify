@@ -97,3 +97,16 @@ model Exclusion {
   @@index([handle])
   @@index([type])
 }
+
+model SearchUsage {
+  id        String   @id @default(cuid())
+  provider  String
+  monthKey  String
+  requests  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, monthKey])
+  @@index([provider])
+  @@index([monthKey])
+}

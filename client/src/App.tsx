@@ -7,7 +7,7 @@ import CreatorTable from './components/CreatorTable';
 import CreatorDrawer from './components/CreatorDrawer';
 import AddCreatorModal from './components/AddCreatorModal';
 import { api } from './lib/api';
-import type { Brief, Creator, CreatorStatus, Exclusion, Stats } from './lib/types';
+import type { Brief, Creator, CreatorStatus, DiscoveryStatus, Exclusion, Stats } from './lib/types';
 
 type View = 'dashboard' | 'discover' | 'candidates' | 'approved' | 'voided' | 'vault';
 
@@ -43,15 +43,17 @@ export default function App(){
   const [discovering,setDiscovering]=useState(false);
   const [exclusions,setExclusions]=useState<Exclusion[]>([]);
   const [importing,setImporting]=useState<'USED'|'VOIDED'|null>(null);
+  const [discoveryStatus,setDiscoveryStatus]=useState<DiscoveryStatus|null>(null);
 
   const statusForView = (v:View): CreatorStatus|undefined => v==='candidates'?'CANDIDATE':v==='approved'?'APPROVED':v==='voided'?'VOIDED':undefined;
   const showToast=(text:string,type:'ok'|'bad'='ok')=>{setToast({text,type});setTimeout(()=>setToast(null),3200)};
 
   async function refreshStats(){ try{setStats(await api.stats())}catch{} }
+  async function refreshDiscoveryStatus(){ try{setDiscoveryStatus(await api.discoveryStatus())}catch{} }
   async function loadCreators(status?:CreatorStatus){ setLoading(true); try{setCreators(await api.creators(status,search))}catch(e:any){showToast(e.message,'bad')}finally{setLoading(false)} }
   async function loadVault(){ try{setExclusions(await api.exclusions())}catch(e:any){showToast(e.message,'bad')} }
 
-  useEffect(()=>{ refreshStats(); },[]);
+  useEffect(()=>{ refreshStats(); refreshDiscoveryStatus(); },[]);
   useEffect(()=>{
     const status=statusForView(view);
     if(status || view==='dashboard') loadCreators(status);
@@ -73,7 +75,7 @@ export default function App(){
   async function saveCreator(id:string,payload:Record<string,unknown>){ try{const updated=await api.updateCreator(id,payload);setSelected(updated);showToast('Creator updated.');await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad');throw e} }
   async function createCreator(payload:Record<string,unknown>){ try{await api.createCreator(payload);showToast('Creator added to Candidates.');await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad');throw e} }
 
-  async function discover(){ setDiscovering(true);setDiscoveryNote('Searching the public web. Free discovery can take 10–30 seconds for a large brief…'); try{const r=await api.discover(brief);setCreators(r.results);setDiscoveryNote(`${r.note} ${r.excluded ? `${r.excluded} known/blocked profile${r.excluded===1?'':'s'} skipped. ` : ''}Provider: ${r.provider}.`);showToast(`Discovery finished: ${r.results.length} ranked leads.`);await refreshStats();}catch(e:any){showToast(e.message,'bad');setDiscoveryNote('Discovery could not complete. Free public search may be temporarily rate-limited; retry shortly.')}finally{setDiscovering(false)} }
+  async function discover(){ setDiscovering(true);setDiscoveryNote('Searching Brave for public creator profiles, then deduplicating and ranking them…'); try{const r=await api.discover(brief);setCreators(r.results);setDiscoveryStatus(r.usage);setDiscoveryNote(`${r.note} ${r.excluded ? `${r.excluded} known/blocked profile${r.excluded===1?'':'s'} skipped. ` : ''}Provider: ${r.provider}.`);showToast(`Discovery finished: ${r.results.length} ranked leads.`);await refreshStats();}catch(e:any){showToast(e.message,'bad');setDiscoveryNote(e.message || 'Discovery could not complete.');await refreshDiscoveryStatus();}finally{setDiscovering(false)} }
 
   async function importFile(file:File,type:'USED'|'VOIDED'){ setImporting(type); try{const r=await api.importExclusions(file,type);showToast(`${r.inserted} new ${type.toLowerCase()} handles imported (${r.alreadyKnown} already known).`);await Promise.all([loadVault(),refreshStats()]);}catch(e:any){showToast(e.message,'bad')}finally{setImporting(null)} }
 
@@ -84,7 +86,7 @@ export default function App(){
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark">IN</div><div><strong>Influentify</strong><span>Creator intelligence</span></div></div>
       <nav>{nav.map(item=>{const Icon=item.icon;return <button key={item.id} className={view===item.id?'active':''} onClick={()=>{setSearch('');setView(item.id)}}><Icon size={18}/><span>{item.label}</span>{item.id==='candidates'&&stats.candidates>0?<em>{stats.candidates}</em>:null}</button>})}</nav>
-      <div className="sidebar-foot"><div className="railway-badge"><span className="pulse"/>Live on Railway</div><p>Free public-web research<br/>No paid creator API</p></div>
+      <div className="sidebar-foot"><div className="railway-badge"><span className="pulse"/>Live on Railway</div><p>Brave public-web research<br/>No paid creator-data subscription</p></div>
     </aside>
 
     <main className="main">
@@ -123,7 +125,7 @@ export default function App(){
               <div className="two-col"><label><span>Min engagement %</span><input type="number" step="0.1" value={brief.minEngagementRate??''} onChange={e=>updateBrief('minEngagementRate',e.target.value?Number(e.target.value):null)}/></label><label><span>Min Reel views</span><input type="number" placeholder="Optional" value={brief.minAvgReelViews??''} onChange={e=>updateBrief('minAvgReelViews',e.target.value?Number(e.target.value):null)}/></label></div>
               <div className="two-col"><label><span>Active within</span><select value={brief.activeWithinDays??''} onChange={e=>updateBrief('activeWithinDays',e.target.value?Number(e.target.value):null)}><option value="">Any time</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label><label><span>Target count</span><input type="number" min="1" max="500" value={brief.targetCount} onChange={e=>updateBrief('targetCount',Number(e.target.value)||100)}/></label></div>
               <label className="toggle-row"><div><strong>Public email required</strong><span>Campaign requires an email; leads without one remain marked incomplete for research.</span></div><input type="checkbox" checked={brief.emailRequired} onChange={e=>updateBrief('emailRequired',e.target.checked)}/><i/></label>
-              <button className="primary discover-btn" onClick={discover} disabled={discovering}><Search size={17}/>{discovering?'Searching public web…':'Find creators — free public web'}</button><div className="free-search-note"><span className="pulse"/> No paid API. Missing metrics stay marked as unknown instead of being guessed.</div>
+              <button className="primary discover-btn" onClick={discover} disabled={discovering || discoveryStatus?.configured===false}><Search size={17}/>{discovering?'Searching Brave…':'Find creators — Brave Search'}</button><div className="free-search-note"><span className="pulse"/> {discoveryStatus?.configured===false?'Brave key is not configured on Railway.':discoveryStatus?`${discoveryStatus.remainingAppBudget.toLocaleString()} of ${discoveryStatus.monthlyBudget.toLocaleString()} app-capped Brave searches remain this month. Missing metrics stay unknown.`:'Brave Search is server-side, app-capped, and only used to locate public source pages.'}</div>
             </div>
           </div>
           <div className="results-panel">

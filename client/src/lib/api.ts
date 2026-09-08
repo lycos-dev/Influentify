@@ -1,4 +1,4 @@
-import type { Brief, Creator, CreatorStatus, Exclusion, Stats } from './types';
+import type { Brief, Creator, CreatorStatus, DiscoveryStatus, Exclusion, Stats } from './types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options);
@@ -10,6 +10,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   stats: () => request<Stats>('/api/stats'),
+  discoveryStatus: () => request<DiscoveryStatus>('/api/discovery/status'),
   creators: (status?: CreatorStatus, search = '') => {
     const qs = new URLSearchParams();
     if (status) qs.set('status', status);
@@ -38,6 +39,9 @@ export const api = {
     strictVerified: number;
     results: Creator[];
     note: string;
+    requestsUsedThisRun: number;
+    quotaReached: boolean;
+    usage: DiscoveryStatus;
   }>('/api/discovery/search', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(brief)
   }),

@@ -1,4 +1,4 @@
-# Influentify
+# Influentify V3
 
 Influentify is a React + Express + PostgreSQL creator-sourcing workspace built for repeated influencer research: discover public Instagram profiles, normalize handles, block duplicates and voided creators, rank leads, review evidence, approve/void, and export clean Excel lists.
 
@@ -9,30 +9,44 @@ Influentify is a React + Express + PostgreSQL creator-sourcing workspace built f
 - PostgreSQL + Prisma
 - One Railway service for frontend + backend
 - Railway PostgreSQL
+- Brave Search API for public-web discovery
 - No AI required
 - No paid influencer-data provider required
 
-## Free public-web discovery
+## V3 discovery engine
 
-Influentify V2 includes a **zero-paid-API discovery adapter** using DuckDuckGo's public non-JavaScript search results.
+V3 replaces fragile search-engine HTML scraping with the official Brave Web Search API. Brave is used only as an **ephemeral locator**. Influentify takes returned result URLs, independently fetches the original public source pages, and stores only information obtained from those source pages. Brave-returned titles, snippets and result data are never written to PostgreSQL.
 
-The worker generates diversified searches using campaign country, city and niche combinations, then extracts public Instagram profile results. It can save public evidence that appears in indexed search results, including:
+It can save public evidence that appears in indexed search results, including:
 
 - Instagram handle and profile URL
 - creator/display name when visible
-- follower count when visible in an indexed snippet
-- public email when visible in an indexed snippet
-- country/city signals from public text
-- niche signals from public text
-- source snippet and evidence
+- follower count when visible in indexed snippets
+- public email when visible in indexed snippets
+- country/city signals
+- niche signals
+- source URL and evidence snippets obtained from independently fetched public source pages
 
-Influentify deliberately does **not** invent unavailable data. Engagement, Reel views and last-post dates remain unknown unless they are manually supplied or later obtained from a reliable public source.
+Influentify deliberately does **not** invent unavailable data. Engagement, Reel views and last-post dates remain unknown unless manually supplied or later obtained from reliable public evidence.
 
-Free search can be rate-limited or return incomplete results. The app treats missing fields as **unknown**, not as failed criteria. Known values that contradict the campaign still reject the candidate.
+## Free-credit protection
+
+Influentify includes its own monthly Brave request counter in PostgreSQL.
+
+Defaults:
+
+```text
+BRAVE_MONTHLY_REQUEST_BUDGET=900
+BRAVE_MAX_REQUESTS_PER_RUN=24
+```
+
+The dashboard shows how many app-capped Brave searches remain for the current month. The server refuses to make additional Brave requests after the app-side monthly budget is reached.
+
+This cap is intentionally lower than the current Brave Search monthly free-credit allowance. Keep your Brave account billing/prepaid limit at $0 as an additional account-level safeguard.
 
 ## Deep Research
 
-Open any creator and choose **Deep research this creator — free**. Influentify runs additional public-web searches for that exact handle and attempts to improve saved follower, email, location and niche evidence.
+Open a creator and choose **Deep research this creator — free**. Influentify runs several targeted Brave searches for that exact handle and attempts to improve follower, email, website, location and niche evidence.
 
 ## Duplicate behavior
 
@@ -44,7 +58,7 @@ These normalize to the same creator:
 
 All become `emmahill`.
 
-These stay different:
+These remain different:
 
 - `ashleyannel`
 - `ashley_annel`
@@ -60,7 +74,36 @@ Import all previous and rejected lists before large discovery runs.
 
 Supported files: `.xlsx`, `.csv`, `.txt`, `.md`.
 
-The importer searches Instagram URLs across spreadsheet cells and also inspects likely social-handle columns.
+## Railway upgrade from V2
+
+Keep the existing Railway service, PostgreSQL database, domain and `DATABASE_URL`.
+
+Add/keep:
+
+```text
+BRAVE_SEARCH_API_KEY=<your Railway secret>
+```
+
+Recommended optional variables:
+
+```text
+BRAVE_MONTHLY_REQUEST_BUDGET=900
+BRAVE_MAX_REQUESTS_PER_RUN=24
+DISCOVERY_DELAY_MS=180
+DISCOVERY_HTTP_TIMEOUT_MS=15000
+SOURCE_HTTP_TIMEOUT_MS=8000
+SOURCE_FETCHES_PER_QUERY=8
+```
+
+Keep Railway commands:
+
+```text
+Build:      npm run railway:build
+Pre-deploy: npm run db:push
+Start:      node server/dist/index.js
+```
+
+`db:push` adds the `SearchUsage` table used for the app-side monthly request counter.
 
 ## Local setup
 
@@ -76,50 +119,6 @@ npm run dev
 Frontend: `http://localhost:5173`
 API: `http://localhost:3000`
 
-## Railway deployment
-
-1. Push the repository to GitHub.
-2. Connect the repository to a Railway service.
-3. Add Railway PostgreSQL.
-4. Set the app variable:
-
-```text
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-```
-
-5. Build command:
-
-```text
-npm run railway:build
-```
-
-6. Pre-deploy command:
-
-```text
-npm run db:push
-```
-
-7. Start command:
-
-```text
-npm start
-```
-
-8. Deploy.
-
-`npm start` now starts the compiled server directly. Schema sync is intentionally handled only by the Railway pre-deploy command, avoiding the earlier Prisma `P3005` conflict.
-
-## Optional free-discovery tuning
-
-No keys are required. These environment variables are optional:
-
-```text
-DISCOVERY_DELAY_MS=650
-DISCOVERY_HTTP_TIMEOUT_MS=12000
-```
-
-Increasing `DISCOVERY_DELAY_MS` makes the worker gentler if public search rate-limits Railway's IP.
-
 ## Ranking
 
 Fit score remains deterministic:
@@ -132,8 +131,17 @@ Fit score remains deterministic:
 - public email: 5
 - country match: 5
 
-Influentify also stores a separate **data confidence** score. Fit score and data confidence are intentionally different: a creator can look like a strong fit while still needing more verification.
+Influentify also stores a separate **data confidence** score. Fit score and data confidence are intentionally separate: a creator may be a promising fit while still needing verification.
 
-## Important limitation
+## Reliability contract
 
-There is no legitimate free source that guarantees complete Instagram analytics for every public creator. Influentify's free mode is therefore a research engine, not a fake analytics API. It uses indexed public-web evidence, exact deduplication and a growing internal database to reduce repeated manual work over time.
+- No Instagram login automation.
+- No CAPTCHA or access-control bypass.
+- No guessed metrics.
+- Search evidence is stored for human review.
+- Used and voided handles are rejected before insertion.
+- Handle normalization is deterministic and punctuation-preserving.
+- Brave API key stays server-side.
+- Brave Search response data is transient and is not stored.
+- Persisted evidence comes from independently fetched original public source pages.
+- An app-side monthly request budget limits search usage.
