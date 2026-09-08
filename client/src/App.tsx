@@ -67,28 +67,31 @@ export default function App(){
   async function approve(c:Creator){ try{await api.approve(c.id);setSelected(null);showToast(`@${c.handle} approved and added to the used list.`);await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad')} }
   async function voidCreator(c:Creator){ const reason=window.prompt(`Why are you voiding @${c.handle}?`,'Not a campaign fit'); if(reason===null)return; try{await api.void(c.id,reason);setSelected(null);showToast(`@${c.handle} moved to Voided.`);await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad')} }
   async function restore(c:Creator){ try{await api.candidate(c.id);setSelected(null);showToast(`@${c.handle} restored to Candidates.`);await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad')} }
+
+  async function researchCreator(c:Creator){ try{const updated=await api.research(c.id);setSelected(updated);showToast(`@${c.handle} public-web research refreshed.`);await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad');throw e} }
+
   async function saveCreator(id:string,payload:Record<string,unknown>){ try{const updated=await api.updateCreator(id,payload);setSelected(updated);showToast('Creator updated.');await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad');throw e} }
   async function createCreator(payload:Record<string,unknown>){ try{await api.createCreator(payload);showToast('Creator added to Candidates.');await Promise.all([refreshStats(),loadCreators(statusForView(view))]);}catch(e:any){showToast(e.message,'bad');throw e} }
 
-  async function discover(){ setDiscovering(true);setDiscoveryNote(''); try{const r=await api.discover(brief);setCreators(r.results);setDiscoveryNote(`${r.note} ${r.newlyAdded} new profile${r.newlyAdded===1?'':'s'} added; ${r.results.length} current matches ranked.`);showToast(`Discovery finished: ${r.results.length} matches.`);await refreshStats();}catch(e:any){showToast(e.message,'bad')}finally{setDiscovering(false)} }
+  async function discover(){ setDiscovering(true);setDiscoveryNote('Searching the public web. Free discovery can take 10–30 seconds for a large brief…'); try{const r=await api.discover(brief);setCreators(r.results);setDiscoveryNote(`${r.note} ${r.excluded ? `${r.excluded} known/blocked profile${r.excluded===1?'':'s'} skipped. ` : ''}Provider: ${r.provider}.`);showToast(`Discovery finished: ${r.results.length} ranked leads.`);await refreshStats();}catch(e:any){showToast(e.message,'bad');setDiscoveryNote('Discovery could not complete. Free public search may be temporarily rate-limited; retry shortly.')}finally{setDiscovering(false)} }
 
   async function importFile(file:File,type:'USED'|'VOIDED'){ setImporting(type); try{const r=await api.importExclusions(file,type);showToast(`${r.inserted} new ${type.toLowerCase()} handles imported (${r.alreadyKnown} already known).`);await Promise.all([loadVault(),refreshStats()]);}catch(e:any){showToast(e.message,'bad')}finally{setImporting(null)} }
 
   const updateBrief=(key:keyof Brief,value:any)=>setBrief(b=>({...b,[key]:value}));
-  const title = nav.find(n=>n.id===view)?.label || 'Influencer Reach';
+  const title = nav.find(n=>n.id===view)?.label || 'Influentify';
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="brand"><div className="brand-mark">IR</div><div><strong>Influencer Reach</strong><span>Creator intelligence</span></div></div>
+      <div className="brand"><div className="brand-mark">IN</div><div><strong>Influentify</strong><span>Creator intelligence</span></div></div>
       <nav>{nav.map(item=>{const Icon=item.icon;return <button key={item.id} className={view===item.id?'active':''} onClick={()=>{setSearch('');setView(item.id)}}><Icon size={18}/><span>{item.label}</span>{item.id==='candidates'&&stats.candidates>0?<em>{stats.candidates}</em>:null}</button>})}</nav>
-      <div className="sidebar-foot"><div className="railway-badge"><span className="pulse"/>Railway-ready</div><p>Deterministic de-duplication<br/>No AI required</p></div>
+      <div className="sidebar-foot"><div className="railway-badge"><span className="pulse"/>Live on Railway</div><p>Free public-web research<br/>No paid creator API</p></div>
     </aside>
 
     <main className="main">
       <header className="topbar"><div><div className="eyebrow">CREATOR OPERATIONS</div><h1>{title}</h1></div><div className="top-actions"><button className="secondary" onClick={()=>setAddOpen(true)}><Plus size={16}/> Add creator</button><a className="primary linkbtn" href="/api/export.xlsx?status=APPROVED"><Download size={16}/> Export approved</a></div></header>
 
       {view==='dashboard' && <section className="page dashboard-page">
-        <div className="hero-card"><div><span className="kicker"><Sparkles size={14}/> Influencer sourcing workspace</span><h2>Build cleaner creator lists,<br/>without finding the same person twice.</h2><p>Search, qualify, approve, void, and export creators from one source of truth.</p><button className="primary hero-cta" onClick={()=>setView('discover')}>Start creator discovery <ChevronRight size={17}/></button></div><div className="hero-orbit"><div className="orbit o1">Verified<br/><strong>Emails</strong></div><div className="orbit o2">Exact<br/><strong>Dedupe</strong></div><div className="orbit o3">Ranked<br/><strong>Fit</strong></div><div className="center-score"><span>Pipeline</span><strong>{stats.total}</strong><small>creators</small></div></div></div>
+        <div className="hero-card"><div><span className="kicker"><Sparkles size={14}/> Influentify sourcing workspace</span><h2>Build cleaner creator lists,<br/>without finding the same person twice.</h2><p>Search, qualify, approve, void, and export creators from one source of truth.</p><button className="primary hero-cta" onClick={()=>setView('discover')}>Start creator discovery <ChevronRight size={17}/></button></div><div className="hero-orbit"><div className="orbit o1">Public<br/><strong>Emails</strong></div><div className="orbit o2">Exact<br/><strong>Dedupe</strong></div><div className="orbit o3">Ranked<br/><strong>Fit</strong></div><div className="center-score"><span>Pipeline</span><strong>{stats.total}</strong><small>creators</small></div></div></div>
 
         <div className="stat-grid">
           <div className="stat-card"><div className="stat-icon"><Users size={19}/></div><span>Candidate pool</span><strong>{stats.candidates.toLocaleString()}</strong><small>Awaiting review</small></div>
@@ -119,12 +122,12 @@ export default function App(){
               <div className="two-col"><label><span>Min followers</span><input type="number" value={brief.minFollowers??''} onChange={e=>updateBrief('minFollowers',e.target.value?Number(e.target.value):null)}/></label><label><span>Max followers</span><input type="number" placeholder="No maximum" value={brief.maxFollowers??''} onChange={e=>updateBrief('maxFollowers',e.target.value?Number(e.target.value):null)}/></label></div>
               <div className="two-col"><label><span>Min engagement %</span><input type="number" step="0.1" value={brief.minEngagementRate??''} onChange={e=>updateBrief('minEngagementRate',e.target.value?Number(e.target.value):null)}/></label><label><span>Min Reel views</span><input type="number" placeholder="Optional" value={brief.minAvgReelViews??''} onChange={e=>updateBrief('minAvgReelViews',e.target.value?Number(e.target.value):null)}/></label></div>
               <div className="two-col"><label><span>Active within</span><select value={brief.activeWithinDays??''} onChange={e=>updateBrief('activeWithinDays',e.target.value?Number(e.target.value):null)}><option value="">Any time</option><option value="14">14 days</option><option value="30">30 days</option><option value="60">60 days</option></select></label><label><span>Target count</span><input type="number" min="1" max="500" value={brief.targetCount} onChange={e=>updateBrief('targetCount',Number(e.target.value)||100)}/></label></div>
-              <label className="toggle-row"><div><strong>Public email required</strong><span>Only keep creators with a saved outreach email.</span></div><input type="checkbox" checked={brief.emailRequired} onChange={e=>updateBrief('emailRequired',e.target.checked)}/><i/></label>
-              <button className="primary discover-btn" onClick={discover} disabled={discovering}><Search size={17}/>{discovering?'Searching and ranking…':'Find matching creators'}</button>
+              <label className="toggle-row"><div><strong>Public email required</strong><span>Campaign requires an email; leads without one remain marked incomplete for research.</span></div><input type="checkbox" checked={brief.emailRequired} onChange={e=>updateBrief('emailRequired',e.target.checked)}/><i/></label>
+              <button className="primary discover-btn" onClick={discover} disabled={discovering}><Search size={17}/>{discovering?'Searching public web…':'Find creators — free public web'}</button><div className="free-search-note"><span className="pulse"/> No paid API. Missing metrics stay marked as unknown instead of being guessed.</div>
             </div>
           </div>
           <div className="results-panel">
-            <div className="results-head"><div><span className="eyebrow">LIVE SHORTLIST</span><h2>Discovery results</h2></div><div className="result-count"><strong>{creators.length}</strong><span>matches</span></div></div>
+            <div className="results-head"><div><span className="eyebrow">LIVE SHORTLIST</span><h2>Discovery results</h2></div><div className="result-count"><strong>{creators.length}</strong><span>ranked leads</span></div></div>
             {discoveryNote && <div className="info-banner"><Sparkles size={16}/><span>{discoveryNote}</span></div>}
             <CreatorTable creators={creators} loading={discovering} search={search} onSearch={setSearch} onOpen={setSelected} onApprove={approve} onVoid={voidCreator} onRestore={restore} emptyText="Run your campaign brief to find matching creators."/>
           </div>
@@ -148,7 +151,7 @@ export default function App(){
       </section>}
     </main>
 
-    <CreatorDrawer creator={selected} onClose={()=>setSelected(null)} onApprove={approve} onVoid={voidCreator} onRestore={restore} onSave={saveCreator}/>
+    <CreatorDrawer creator={selected} onClose={()=>setSelected(null)} onApprove={approve} onVoid={voidCreator} onRestore={restore} onSave={saveCreator} onResearch={researchCreator}/>
     <AddCreatorModal open={addOpen} onClose={()=>setAddOpen(false)} onCreate={createCreator}/>
     {toast&&<div className={`toast ${toast.type}`}>{toast.type==='ok'?<CheckCircle2 size={17}/>:<XCircle size={17}/>}<span>{toast.text}</span></div>}
   </div>;

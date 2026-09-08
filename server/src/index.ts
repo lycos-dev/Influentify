@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import { prisma } from './lib/prisma.js';
 import { normalizeInstagramHandle, instagramUrl } from './lib/handles.js';
-import { creatorPassesBrief, scoreCreator } from './lib/score.js';
-import { discoverWithSerper } from './lib/discovery.js';
+import { creatorPassesBrief, creatorPotentiallyMatchesBrief, requiredFieldCoverage, scoreCreator } from './lib/score.js';
+import { discoverFree, researchCreatorFree } from './lib/discovery.js';
 import { extractInstagramHandles } from './lib/importer.js';
 
 const app = express();
@@ -29,6 +29,7 @@ const creatorInput = z.object({
   avgLikes: z.coerce.number().int().nonnegative().optional().nullable(),
   avgReelViews: z.coerce.number().int().nonnegative().optional().nullable(),
   email: z.union([z.string().email(), z.literal('')]).optional().nullable(),
+  website: z.union([z.string().url(), z.literal('')]).optional().nullable(),
   lastPostAt: z.string().optional().nullable(),
   notes: z.string().optional().nullable()
 });
@@ -49,7 +50,7 @@ const briefSchema = z.object({
 app.get('/api/health', async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
-    res.json({ ok: true, database: true, discovery: process.env.SERPER_API_KEY ? 'serper' : 'manual/import' });
+    res.json({ ok: true, database: true, discovery: 'duckduckgo-public-web', paidProvider: false });
   } catch {
     res.status(503).json({ ok: false, database: false });
   }
@@ -121,6 +122,9 @@ app.post('/api/creators', async (req, res) => {
       avgLikes: data.avgLikes ?? null,
       avgReelViews: data.avgReelViews ?? null,
       email: data.email || null,
+      website: data.website || null,
+      dataConfidence: 100,
+      verificationStatus: 'MANUAL',
       lastPostAt: data.lastPostAt ? new Date(data.lastPostAt) : null,
       notes: data.notes || null,
       score
@@ -150,6 +154,7 @@ app.patch('/api/creators/:id', async (req, res) => {
       handle,
       instagramUrl: instagramUrl(handle),
       email: parsed.data.email === '' ? null : parsed.data.email,
+      website: parsed.data.website === '' ? null : parsed.data.website,
       lastPostAt: parsed.data.lastPostAt ? new Date(parsed.data.lastPostAt) : parsed.data.lastPostAt === null ? null : undefined,
       score
     }
@@ -203,30 +208,41 @@ app.post('/api/discovery/search', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const brief = parsed.data;
 
-  // First, rank/filter what is already in the database.
-  const existing = await prisma.creator.findMany({ where: { status: { not: 'VOIDED' } }, take: 1000 });
+  // Rank compatible creators already in Influentify first. Missing public-web fields do not automatically
+  // discard a creator; known values that contradict the brief still do.
+  const existing = await prisma.creator.findMany({ where: { status: { not: 'VOIDED' } }, take: 2000 });
   const existingMatches = existing
-    .filter(c => creatorPassesBrief(c, brief))
-    .map(c => ({ ...c, score: scoreCreator(c, brief) }))
-    .sort((a, b) => b.score - a.score);
+    .filter(c => creatorPotentiallyMatchesBrief(c, brief))
+    .map(c => ({ ...c, score: scoreCreator(c, brief), coverage: requiredFieldCoverage(c, brief) }))
+    .sort((a, b) => (b.score * .75 + b.dataConfidence * .25) - (a.score * .75 + a.dataConfidence * .25));
 
-  // Optionally discover new public profile URLs via web search. This deliberately does not scrape Instagram.
-  const external = await discoverWithSerper(brief);
+  // Zero-cost public-web discovery through DuckDuckGo's non-JavaScript search results. We do not automate
+  // Instagram login, bypass access controls, or invent unavailable metrics.
+  const external = await discoverFree(brief);
   const exclusions = new Set((await prisma.exclusion.findMany({ select: { handle: true } })).map(x => x.handle));
   const known = new Set(existing.map(x => x.handle));
   let newlyAdded = 0;
+  let excluded = 0;
 
   for (const item of external) {
-    if (exclusions.has(item.handle) || known.has(item.handle)) continue;
+    if (exclusions.has(item.handle) || known.has(item.handle)) { excluded++; continue; }
     await prisma.creator.create({
       data: {
         handle: item.handle,
         instagramUrl: item.instagramUrl,
-        name: item.name,
-        country: item.country,
-        niche: item.niche,
+        name: item.name ?? null,
+        country: item.country ?? null,
+        city: item.city ?? null,
+        niche: item.niche ?? null,
+        followers: item.followers ?? null,
+        email: item.email ?? null,
+        website: item.website ?? null,
         source: item.source,
-        sourceSnippet: item.sourceSnippet,
+        sourceUrl: item.sourceUrl ?? null,
+        sourceSnippet: item.sourceSnippet ?? null,
+        sourceEvidence: item.evidence as any,
+        dataConfidence: item.dataConfidence,
+        verificationStatus: item.verificationStatus,
         score: scoreCreator(item, brief)
       }
     });
@@ -234,25 +250,86 @@ app.post('/api/discovery/search', async (req, res) => {
     newlyAdded++;
   }
 
-  const refreshed = await prisma.creator.findMany({ where: { status: 'CANDIDATE' }, take: 1000 });
-  const matches = refreshed
-    .filter(c => creatorPassesBrief(c, brief))
-    .map(c => ({ ...c, score: scoreCreator(c, brief) }))
-    .sort((a, b) => b.score - a.score)
+  const refreshed = await prisma.creator.findMany({ where: { status: 'CANDIDATE' }, take: 2000 });
+  const ranked = refreshed
+    .filter(c => creatorPotentiallyMatchesBrief(c, brief))
+    .map(c => ({
+      ...c,
+      score: scoreCreator(c, brief),
+      coverage: requiredFieldCoverage(c, brief),
+      strictMatch: creatorPassesBrief(c, brief)
+    }))
+    .sort((a, b) => {
+      if (a.strictMatch !== b.strictMatch) return a.strictMatch ? -1 : 1;
+      return (b.score * .7 + b.dataConfidence * .2 + b.coverage * .1) - (a.score * .7 + a.dataConfidence * .2 + a.coverage * .1);
+    })
     .slice(0, brief.targetCount);
 
-  // Persist campaign-specific scores so the list sorts naturally after discovery.
-  await Promise.all(matches.map(c => prisma.creator.update({ where: { id: c.id }, data: { score: c.score } })));
+  await Promise.all(ranked.map(c => prisma.creator.update({
+    where: { id: c.id },
+    data: {
+      score: c.score,
+      verificationStatus: c.strictMatch ? 'VERIFIED_FOR_BRIEF' : c.verificationStatus
+    }
+  })));
+
+  const strictVerified = ranked.filter(x => x.strictMatch).length;
+  const results = ranked.map(({ coverage: _coverage, strictMatch, ...creator }) => ({
+    ...creator,
+    verificationStatus: strictMatch ? 'VERIFIED_FOR_BRIEF' : creator.verificationStatus
+  }));
 
   res.json({
-    provider: process.env.SERPER_API_KEY ? 'serper + database' : 'database only',
+    provider: 'DuckDuckGo public web + Influentify database',
+    paidProvider: false,
     newlyAdded,
+    excluded,
     existingMatches: existingMatches.length,
-    results: matches,
-    note: process.env.SERPER_API_KEY
-      ? 'Public profile URLs were discovered through web search. Metrics still require review/import or a dedicated creator-data provider.'
-      : 'Add SERPER_API_KEY for public web discovery, or import/manual-add creators. No Instagram scraping is performed.'
+    strictVerified,
+    results,
+    note: newlyAdded
+      ? `Free public-web research found ${newlyAdded} new profiles. ${strictVerified} currently satisfy every requested field with saved data; the rest are ranked leads with missing fields shown for review.`
+      : 'No new public profiles were returned this run. Influentify still ranked compatible creators already in your vault. Free search can be rate-limited, so retry later or broaden the campaign brief.'
   });
+});
+
+app.post('/api/creators/:id/research', async (req, res) => {
+  const current = await prisma.creator.findUnique({ where: { id: req.params.id } });
+  if (!current) return res.status(404).json({ error: 'Creator not found.' });
+  const researched = await researchCreatorFree(current.handle, { countries: [], niches: [] });
+  if (!researched) return res.status(404).json({ error: 'No additional public-web evidence found.' });
+
+  const merged = {
+    ...current,
+    name: current.name || researched.name || null,
+    country: current.country || researched.country || null,
+    city: current.city || researched.city || null,
+    niche: current.niche || researched.niche || null,
+    followers: current.followers ?? researched.followers ?? null,
+    email: current.email || researched.email || null,
+    website: current.website || researched.website || null,
+    dataConfidence: Math.max(current.dataConfidence, researched.dataConfidence)
+  };
+  const creator = await prisma.creator.update({
+    where: { id: current.id },
+    data: {
+      name: merged.name,
+      country: merged.country,
+      city: merged.city,
+      niche: merged.niche,
+      followers: merged.followers,
+      email: merged.email,
+      website: merged.website,
+      source: researched.source,
+      sourceUrl: researched.sourceUrl ?? current.sourceUrl,
+      sourceSnippet: researched.sourceSnippet ?? current.sourceSnippet,
+      sourceEvidence: researched.evidence as any,
+      dataConfidence: merged.dataConfidence,
+      verificationStatus: researched.verificationStatus,
+      score: scoreCreator(merged)
+    }
+  });
+  res.json(creator);
 });
 
 app.get('/api/exclusions', async (req, res) => {
@@ -284,7 +361,7 @@ app.get('/api/export.xlsx', async (req, res) => {
   const creators = await prisma.creator.findMany({ where: { status }, orderBy: [{ score: 'desc' }, { followers: 'desc' }] });
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Influencer Reach';
+  wb.creator = 'Influentify';
   const ws = wb.addWorksheet(status === 'APPROVED' ? 'Approved Creators' : 'Creators');
   ws.columns = [
     { header: 'Name', key: 'name', width: 28 },
@@ -298,20 +375,23 @@ app.get('/api/export.xlsx', async (req, res) => {
     { header: 'Avg Likes', key: 'avgLikes', width: 14 },
     { header: 'Avg Reel Views', key: 'avgReelViews', width: 17 },
     { header: 'Email', key: 'email', width: 32 },
+    { header: 'Data Confidence %', key: 'dataConfidence', width: 18 },
+    { header: 'Verification', key: 'verificationStatus', width: 22 },
     { header: 'Score', key: 'score', width: 10 },
     { header: 'Status', key: 'status', width: 14 },
+    { header: 'Source', key: 'source', width: 24 },
     { header: 'Notes', key: 'notes', width: 36 }
   ];
   ws.addRows(creators);
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  ws.autoFilter = { from: 'A1', to: 'N1' };
+  ws.autoFilter = { from: 'A1', to: 'Q1' };
   creators.forEach((creator, i) => {
     ws.getCell(i + 2, 3).value = { text: creator.instagramUrl, hyperlink: creator.instagramUrl };
   });
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="influencer-reach-${String(status).toLowerCase()}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="influentify-${String(status).toLowerCase()}.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
 });
@@ -331,5 +411,5 @@ app.use((req, res, next) => {
 });
 
 app.listen(port, () => {
-  console.log(`Influencer Reach listening on :${port}`);
+  console.log(`Influentify listening on :${port}`);
 });

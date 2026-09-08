@@ -6,11 +6,12 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate && tsup src/index.ts --format esm --platform node --target node22 --outDir dist --clean",
-    "start": "prisma migrate deploy && node dist/index.js",
+    "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "tsx prisma/seed.ts",
+    "migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^6.15.0",

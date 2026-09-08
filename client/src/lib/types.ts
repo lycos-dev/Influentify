@@ -13,11 +13,16 @@ export type Creator = {
   avgLikes: number | null;
   avgReelViews: number | null;
   email: string | null;
+  website?: string | null;
   lastPostAt: string | null;
   score: number;
   status: CreatorStatus;
   source?: string | null;
+  sourceUrl?: string | null;
   sourceSnippet?: string | null;
+  sourceEvidence?: unknown;
+  dataConfidence?: number;
+  verificationStatus?: string;
   notes?: string | null;
   voidReason?: string | null;
 };

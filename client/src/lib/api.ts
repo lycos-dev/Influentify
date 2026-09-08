@@ -28,7 +28,17 @@ export const api = {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason })
   }),
   candidate: (id: string) => request<Creator>(`/api/creators/${id}/candidate`, { method: 'POST' }),
-  discover: (brief: Brief) => request<{ provider: string; newlyAdded: number; existingMatches: number; results: Creator[]; note: string }>('/api/discovery/search', {
+  research: (id: string) => request<Creator>(`/api/creators/${id}/research`, { method: 'POST' }),
+  discover: (brief: Brief) => request<{
+    provider: string;
+    paidProvider: boolean;
+    newlyAdded: number;
+    excluded: number;
+    existingMatches: number;
+    strictVerified: number;
+    results: Creator[];
+    note: string;
+  }>('/api/discovery/search', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(brief)
   }),
   exclusions: (type?: 'USED' | 'VOIDED') => request<Exclusion[]>(`/api/exclusions${type ? `?type=${type}` : ''}`),

@@ -31,11 +31,16 @@ model Creator {
   avgLikes           Int?
   avgReelViews       Int?
   email              String?
+  website            String?
   lastPostAt         DateTime?
   score              Float         @default(0)
   status             CreatorStatus @default(CANDIDATE)
   source             String?       @default("manual")
   sourceSnippet      String?
+  sourceUrl          String?
+  sourceEvidence     Json?
+  dataConfidence     Int           @default(0)
+  verificationStatus String        @default("MANUAL")
   notes              String?
   voidReason         String?
   createdAt          DateTime      @default(now())
@@ -47,6 +52,7 @@ model Creator {
   @@index([country])
   @@index([followers])
   @@index([score])
+  @@index([dataConfidence])
 }
 
 model Campaign {

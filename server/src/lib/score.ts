@@ -6,6 +6,7 @@ export type ScoreInput = {
   country?: string | null;
   niche?: string | null;
   email?: string | null;
+  dataConfidence?: number | null;
 };
 
 export type ScoreBrief = {
@@ -67,16 +68,17 @@ export function scoreCreator(c: ScoreInput, brief: ScoreBrief = {}) {
   return Math.round(score * 10) / 10;
 }
 
+/** Strict qualification: every requested field must be known and satisfy the brief. */
 export function creatorPassesBrief(c: ScoreInput, brief: ScoreBrief = {}) {
   if (brief.countries?.length && (!c.country || !brief.countries.map(x => x.toLowerCase()).includes(c.country.toLowerCase()))) return false;
   if (brief.niches?.length) {
     const n = (c.niche ?? '').toLowerCase().trim();
     if (!n || !brief.niches.some(x => n.includes(x.toLowerCase()) || x.toLowerCase().includes(n))) return false;
   }
-  if (brief.minFollowers != null && (c.followers ?? 0) < brief.minFollowers) return false;
-  if (brief.maxFollowers != null && (c.followers ?? Number.MAX_SAFE_INTEGER) > brief.maxFollowers) return false;
-  if (brief.minEngagementRate != null && (c.engagementRate ?? 0) < brief.minEngagementRate) return false;
-  if (brief.minAvgReelViews != null && (c.avgReelViews ?? 0) < brief.minAvgReelViews) return false;
+  if (brief.minFollowers != null && (c.followers == null || c.followers < brief.minFollowers)) return false;
+  if (brief.maxFollowers != null && (c.followers == null || c.followers > brief.maxFollowers)) return false;
+  if (brief.minEngagementRate != null && (c.engagementRate == null || c.engagementRate < brief.minEngagementRate)) return false;
+  if (brief.minAvgReelViews != null && (c.avgReelViews == null || c.avgReelViews < brief.minAvgReelViews)) return false;
   if (brief.emailRequired && !c.email) return false;
   if (brief.activeWithinDays != null) {
     if (!c.lastPostAt) return false;
@@ -84,4 +86,39 @@ export function creatorPassesBrief(c: ScoreInput, brief: ScoreBrief = {}) {
     if (days > brief.activeWithinDays) return false;
   }
   return true;
+}
+
+/**
+ * Discovery qualification: known data may reject a creator, but missing public-web data does not.
+ * This is important for a no-paid-API workflow: unknown metrics are surfaced for review rather than
+ * being silently discarded.
+ */
+export function creatorPotentiallyMatchesBrief(c: ScoreInput, brief: ScoreBrief = {}) {
+  if (brief.countries?.length && c.country && !brief.countries.map(x => x.toLowerCase()).includes(c.country.toLowerCase())) return false;
+  if (brief.niches?.length && c.niche) {
+    const n = c.niche.toLowerCase().trim();
+    if (n && !brief.niches.some(x => n.includes(x.toLowerCase()) || x.toLowerCase().includes(n))) return false;
+  }
+  if (brief.minFollowers != null && c.followers != null && c.followers < brief.minFollowers) return false;
+  if (brief.maxFollowers != null && c.followers != null && c.followers > brief.maxFollowers) return false;
+  if (brief.minEngagementRate != null && c.engagementRate != null && c.engagementRate < brief.minEngagementRate) return false;
+  if (brief.minAvgReelViews != null && c.avgReelViews != null && c.avgReelViews < brief.minAvgReelViews) return false;
+  if (brief.activeWithinDays != null && c.lastPostAt) {
+    const days = (Date.now() - new Date(c.lastPostAt).getTime()) / 86_400_000;
+    if (days > brief.activeWithinDays) return false;
+  }
+  return true;
+}
+
+export function requiredFieldCoverage(c: ScoreInput, brief: ScoreBrief = {}) {
+  const checks: boolean[] = [];
+  if (brief.countries?.length) checks.push(Boolean(c.country));
+  if (brief.niches?.length) checks.push(Boolean(c.niche));
+  if (brief.minFollowers != null || brief.maxFollowers != null) checks.push(c.followers != null);
+  if (brief.minEngagementRate != null) checks.push(c.engagementRate != null);
+  if (brief.minAvgReelViews != null) checks.push(c.avgReelViews != null);
+  if (brief.emailRequired) checks.push(Boolean(c.email));
+  if (brief.activeWithinDays != null) checks.push(Boolean(c.lastPostAt));
+  if (!checks.length) return 100;
+  return Math.round((checks.filter(Boolean).length / checks.length) * 100);
 }

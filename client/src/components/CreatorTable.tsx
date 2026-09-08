@@ -11,6 +11,12 @@ export function ScorePill({ score }: { score: number }) {
   return <span className={`score-pill ${cls}`}>{score.toFixed(1)}</span>;
 }
 
+function Confidence({ value = 0, status = '' }: { value?: number; status?: string }) {
+  const cls = value >= 80 ? 'high' : value >= 50 ? 'mid' : 'low';
+  const label = status === 'VERIFIED_FOR_BRIEF' ? 'brief verified' : `${value}% data`;
+  return <span className={`confidence-pill ${cls}`}>{label}</span>;
+}
+
 export default function CreatorTable({
   creators,
   loading,
@@ -51,7 +57,7 @@ export default function CreatorTable({
             <td className="metric-cell">{c.engagementRate != null ? `${c.engagementRate.toFixed(1)}%` : '—'}</td>
             <td className="metric-cell">{compact(c.avgReelViews)}</td>
             <td>{c.email ? <span className="contact-ok"><Mail size={14}/> Email</span> : <span className="muted-cell">No email</span>}</td>
-            <td><ScorePill score={c.score}/></td>
+            <td><div className="score-stack"><ScorePill score={c.score}/><Confidence value={c.dataConfidence || 0} status={c.verificationStatus || ''}/></div></td>
             <td onClick={e => e.stopPropagation()}>
               <div className="row-actions">
                 {c.status === 'CANDIDATE' && <><button className="icon-btn good" title="Approve" onClick={() => onApprove(c)}><Check size={16}/></button><button className="icon-btn bad" title="Void" onClick={() => onVoid(c)}><X size={16}/></button></>}
